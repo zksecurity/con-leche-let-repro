@@ -1,13 +1,14 @@
 # con-leche: a local `have` makes a cheap check expensive
 
-Lean accepts both files below in 0.2 s. con-leche accepts one and crashes on the other.
+Lean accepts all three files below in 0.2 s. con-leche accepts two and crashes on the other.
 
 | | Lean v4.36.0 | con-leche bc667610 (master, 2026-11-21) |
 |---|---|---|
 | `Repro/ViaLemma.lean` | 0.2 s | accepted, 3.6 s |
 | `Repro/ViaHave.lean` | 0.2 s | stack overflow (exit 134) after 43 s, 13 GB |
+| `Repro/ViaBeta.lean` | 0.2 s | accepted, 2.8 s |
 
-The two files prove the same thing. The only difference is where the helper fact lives.
+The files prove the same thing. The only difference is where the helper fact lives.
 
 **Step 1: the definitions** (`Repro/Basic.lean`). `Ch` is SHA-256's choice function. `deep n` is just `n`, but computing it takes `n` nested steps, so `deep 10000000` is very expensive to evaluate.
 
@@ -28,6 +29,8 @@ It is proved by `rfl`. Checking it is cheap, because `a b c` are variables: unfo
 **Step 6: why that is expensive.** With a concrete argument, the check tries to evaluate `deep 10000000`. That is ten million nested steps, which overflows the stack. Lean's own kernel can't do it either. `DirectKernel.lean` gives it exactly this check, and it fails with "deep recursion detected" after 100 s. Lean never runs into this because of step 4.
 
 **Impact.** This is not a soundness problem: con-leche never accepts anything wrong because of it. But it refuses proofs that Lean accepts, and it fails by crashing instead of reporting "declined". We hit it on a SHA-256 circuit proof. There, a local `have Ch_def … := fun _ _ _ => rfl` is used with `rw` on 32-bit sums.
+
+**The same proof as a β-redex.** `ViaBeta` writes the `have` as `(fun h => h _ _ _) (fun _ _ _ => rfl)`. For a λ, con-leche checks the body with `h` as a variable of the declared type, as Lean does for the `have`, so nothing is re-proved at `deep 10000000`. Only `let`/`have` substitute the proof.
 
 **Suggested fix.** Do what Lean's kernel does (`infer_let` in `src/kernel/type_checker.cpp`): check the body of a `have` with the declared type of its variable, instead of substituting the proof.
 
